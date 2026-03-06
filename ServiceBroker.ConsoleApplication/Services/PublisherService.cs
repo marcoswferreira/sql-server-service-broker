@@ -1,85 +1,69 @@
 using System.Data;
-using System.Runtime.InteropServices;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ServiceBroker.ConsoleApplication.Configurations;
 using ServiceBroker.ConsoleApplication.Interfaces;
 
 namespace ServiceBroker.ConsoleApplication.Services;
+
 public class PublisherService : IPublisherService
 {
-    private readonly IConfiguration _configuration;
+    private readonly IDbConnectionFactory _connectionFactory;
+    private readonly ServiceBrokerOptions _options;
     private readonly ILogger<PublisherService> _logger;
-    public PublisherService(IConfiguration configuration, ILogger<PublisherService> logger)
+
+    public PublisherService(
+        IDbConnectionFactory connectionFactory, 
+        IOptions<ServiceBrokerOptions> options, 
+        ILogger<PublisherService> logger)
     {
-        _configuration = configuration;
+        _connectionFactory = connectionFactory;
+        _options = options.Value;
         _logger = logger;
     }
 
-    public async Task PublishMessage(string message = "Hello World!")
+    public async Task PublishMessageAsync(string message = "Hello World!", CancellationToken cancellationToken = default)
     {
-        string connectionString = GetConnectionString();
-
-        using var connection = new SqlConnection(connectionString);
-
-        await connection.OpenAsync();
-
-        SqlCommand command = connection.CreateCommand();
+        using SqlConnection connection = await _connectionFactory.CreateConnectionAsync(cancellationToken);
+        using SqlCommand command = connection.CreateCommand();
 
         try
         {
-            command.CommandText = GetQuery(message);
-
+            command.CommandText = GetQuery();
             command.Transaction = connection.BeginTransaction();
 
-            SqlParameter sqlParameter = new("@dialog_handle", SqlDbType.UniqueIdentifier)
+            command.Parameters.Add(new SqlParameter("@dialog_handle", SqlDbType.UniqueIdentifier)
             {
                 Direction = ParameterDirection.Output
-            };
+            });
+            
+            command.Parameters.Add(new SqlParameter("@message_body", SqlDbType.NVarChar, -1) { Value = message });
+            command.Parameters.Add(new SqlParameter("@service_name", SqlDbType.NVarChar, 128) { Value = _options.Queue });
 
-            command.Parameters.Add(sqlParameter);
-
-            command.Parameters.AddWithValue("@message_body", message);
-            command.Parameters.AddWithValue("@service_name", $"{DatabaseConfig.GetQueueName()}");
-
-            await command.ExecuteNonQueryAsync();
-
-            await command.Transaction.CommitAsync();
-        }
-        catch (SqlException ex)
-        {
-            _logger.LogError(ex, "Error on publish message.");
-            await command.Transaction.RollbackAsync();
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            await command.Transaction.CommitAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error on publish message.");
-            await command.Transaction.RollbackAsync();
-        }
-        finally
-        {
-            await connection.CloseAsync();
+            _logger.LogError(ex, "Error occurred while publishing message.");
+            if (command.Transaction != null)
+            {
+                await command.Transaction.RollbackAsync(cancellationToken);
+            }
         }
     }
 
-    private static string GetConnectionString()
+    private string GetQuery()
     {
-        return DatabaseConfig.GetConnectionString();
-    }
-
-    private string GetQuery(string message)
-    {
-        string service = DatabaseConfig.GetServiceName();
-        string contract = DatabaseConfig.GetContractName();
-        string messageType = DatabaseConfig.GetMessageType();
-
-        return $@"BEGIN DIALOG @dialog_handle
-                        FROM SERVICE {service}
-                        TO SERVICE '{service}', 'CURRENT DATABASE'
-                        ON CONTRACT {contract}
-                        WITH ENCRYPTION = OFF;
-                    SEND ON CONVERSATION @dialog_handle
-                        MESSAGE TYPE {messageType}(@message_body);";
+        return $"""
+                BEGIN DIALOG @dialog_handle
+                    FROM SERVICE {_options.Service}
+                    TO SERVICE '{_options.Service}', 'CURRENT DATABASE'
+                    ON CONTRACT {_options.Contract}
+                    WITH ENCRYPTION = OFF;
+                SEND ON CONVERSATION @dialog_handle
+                    MESSAGE TYPE {_options.MessageType}(@message_body);
+                """;
     }
 }

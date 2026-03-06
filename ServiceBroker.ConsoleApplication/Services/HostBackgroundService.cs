@@ -20,7 +20,7 @@ public class HostBackgroundService : BackgroundService
         {
             try
             {
-                await _subscribeService.SubscribeMessage();
+                await _subscribeService.SubscribeMessageAsync(stoppingToken);
             }
             catch (Exception ex)
             {

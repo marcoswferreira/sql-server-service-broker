@@ -1,6 +1,0 @@
-c:\dev\labs\lab-service-broker\poc-service-broker\ServiceBroker.UnitTests\bin\Debug\net6.0\CoverletSourceRootsMapping
-c:\dev\labs\lab-service-broker\poc-service-broker\ServiceBroker.UnitTests\obj\Debug\net6.0\ServiceBroker.UnitTests.csproj.AssemblyReference.cache
-c:\dev\labs\lab-service-broker\poc-service-broker\ServiceBroker.UnitTests\obj\Debug\net6.0\ServiceBroker.UnitTests.GeneratedMSBuildEditorConfig.editorconfig
-c:\dev\labs\lab-service-broker\poc-service-broker\ServiceBroker.UnitTests\obj\Debug\net6.0\ServiceBroker.UnitTests.AssemblyInfoInputs.cache
-c:\dev\labs\lab-service-broker\poc-service-broker\ServiceBroker.UnitTests\obj\Debug\net6.0\ServiceBroker.UnitTests.AssemblyInfo.cs
-c:\dev\labs\lab-service-broker\poc-service-broker\ServiceBroker.UnitTests\obj\Debug\net6.0\ServiceBroker.UnitTests.csproj.CoreCompileInputs.cache

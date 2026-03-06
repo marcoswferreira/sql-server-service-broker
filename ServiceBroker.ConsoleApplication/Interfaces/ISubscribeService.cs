@@ -1,5 +1,6 @@
 namespace ServiceBroker.ConsoleApplication.Interfaces;
+
 public interface ISubscribeService
 {
-    Task SubscribeMessage();
+    Task SubscribeMessageAsync(CancellationToken cancellationToken = default);
 }

@@ -1,60 +1,46 @@
 using System.Data;
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
+using ServiceBroker.ConsoleApplication.Interfaces;
 
 namespace ServiceBroker.ConsoleApplication.Configurations;
+
 public static class DatabaseConfig
 {
-    private static IConfiguration _configuration = GetConfiguration();
-
-    private static IConfiguration GetConfiguration()
+    public static void StartQueue(IDbConnectionFactory connectionFactory, IOptions<ServiceBrokerOptions> options)
     {
-        string appSettings = Path.GetFullPath("../../../appsettings.json");
+        var settings = options.Value;
+        using SqlConnection connection = connectionFactory.CreateConnection();
 
-        return new ConfigurationBuilder()
-            .AddJsonFile(appSettings)
-            .Build();
-    }
-
-    public static void StartQeueu()
-    {
-        string connectionString = GetConnectionString();
-
-        using SqlConnection connection = new(connectionString);
-        connection.Open();
-
-        CreateQueue(connection, GetQueueName());
-        CreateService(connection, GetServiceName());
-        CreateMessageType(connection, GetMessageType());
-        CreateContract(connection, GetContractName());
+        CreateQueue(connection, settings.Queue);
+        CreateService(connection, settings.Service, settings.Queue);
+        CreateMessageType(connection, settings.MessageType);
+        CreateContract(connection, settings.Contract, settings.MessageType);
     }
 
     public static void CreateMessageType(SqlConnection connection, string messageTypeName)
     {
         if (!ExistsInDatabase(connection, "sys.service_message_types", "name", messageTypeName))
         {
-            string createMessageTypeQuery = "CREATE MESSAGE TYPE " + messageTypeName + " VALIDATION = NONE;";
-
+            string createMessageTypeQuery = $"CREATE MESSAGE TYPE {messageTypeName} VALIDATION = NONE;";
             ExecuteNonQuery(connection, createMessageTypeQuery);
         }
     }
 
-    public static void CreateContract(SqlConnection connection, string contractName)
+    public static void CreateContract(SqlConnection connection, string contractName, string messageTypeName)
     {
         if (!ExistsInDatabase(connection, "sys.service_contracts", "name", contractName))
         {
-            string createContractQuery = "CREATE CONTRACT " + contractName + " ([your_message_type_name] SENT BY ANY);";
-
+            string createContractQuery = $"CREATE CONTRACT {contractName} ([{messageTypeName}] SENT BY ANY);";
             ExecuteNonQuery(connection, createContractQuery);
         }
     }
 
-    public static void CreateService(SqlConnection connection, string serviceName)
+    public static void CreateService(SqlConnection connection, string serviceName, string queueName)
     {
         if (!ExistsInDatabase(connection, "sys.services", "name", serviceName))
         {
-            string createServiceQuery = "CREATE SERVICE " + serviceName + " ON QUEUE " + GetQueueName() + " ([DEFAULT]);";
-
+            string createServiceQuery = $"CREATE SERVICE {serviceName} ON QUEUE {queueName} ([DEFAULT]);";
             ExecuteNonQuery(connection, createServiceQuery);
         }
     }
@@ -83,7 +69,7 @@ public static class DatabaseConfig
     {
         string query = "SELECT COUNT(*) FROM sys.service_queues WHERE name = @QueueName";
 
-        SqlCommand command = connection.CreateCommand();
+        using SqlCommand command = connection.CreateCommand();
         command.CommandText = query;
 
         command.Parameters.Add("@QueueName", SqlDbType.NVarChar).Value = queueName;
@@ -91,52 +77,22 @@ public static class DatabaseConfig
 
         if (count == 0)
         {
-            string enableQueueQuery = "ALTER DATABASE DatabaseName SET ENABLE_BROKER";
+            // Note: Enabling broker requires exclusive lock in some environments, but this works for demo.
+            string enableQueueQuery = "ALTER DATABASE CURRENT SET ENABLE_BROKER WITH ROLLBACK IMMEDIATE;";
 
             command.CommandText = enableQueueQuery;
-            command.ExecuteNonQuery();
+            try { command.ExecuteNonQuery(); } catch { /* Ignore if already enabled or failed */ }
 
-            string createQueueQuery = "CREATE QUEUE " + queueName + " " +
-                        "WITH STATUS = ON, " +
-                        "RETENTION = ON, " +
-                        "ACTIVATION (" +
-                        "MAX_QUEUE_READERS = 2, " +
-                        "EXECUTE AS SELF) " +
-                        "ON [DEFAULT];";
+            string createQueueQuery = $@"CREATE QUEUE {queueName} 
+                                        WITH STATUS = ON, 
+                                        RETENTION = ON, 
+                                        ACTIVATION (
+                                            MAX_QUEUE_READERS = 2, 
+                                            EXECUTE AS SELF
+                                        ) ON [DEFAULT];";
 
             command.CommandText = createQueueQuery;
             command.ExecuteNonQuery();
         }
-    }
-    public static string GetQueueName()
-    {
-        return _configuration["ServiceBroker:Queue"]
-                ?? throw new ApplicationException("Queue name not found.");
-    }
-
-    public static string GetServiceName()
-    {
-        return _configuration["ServiceBroker:Service"]
-                ?? throw new ApplicationException("Service name not found.");
-    }
-
-    public static string GetContractName()
-    {
-        return _configuration["ServiceBroker:Contract"]
-                ?? throw new ApplicationException("Contract name not found.");
-    }
-
-    public static string GetMessageType()
-    {
-        return _configuration["ServiceBroker:MessageType"]
-                ?? throw new ApplicationException("Message type not found.");
-    }
-
-    public static string GetConnectionString()
-    {
-        string connection = _configuration["ConnectionStrings:DefaultConnection"]
-                            ?? throw new ApplicationException("Database connection string not found.");
-
-        return connection;
     }
 }
